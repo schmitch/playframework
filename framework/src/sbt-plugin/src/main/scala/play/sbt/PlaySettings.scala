@@ -118,7 +118,7 @@ object PlaySettings {
     playDependencyClasspath := (externalDependencyClasspath in Runtime).value,
 
     // all user classes, in this project and any other subprojects that it depends on
-    playReloaderClasspath := Classpaths.concatDistinct(exportedProducts in Runtime, internalDependencyClasspath in Runtime).value,
+    playReloaderClasspath := Classpaths.concatDistinct(exportedProductsIfMissing in Runtime, internalDependencyClasspath in Runtime).value,
 
     // filter out asset directories from the classpath (supports sbt-web 1.0 and 1.1)
     playReloaderClasspath ~= { _.filter(_.get(WebKeys.webModulesLib.key).isEmpty) },
