@@ -9,10 +9,11 @@ import javax.net.ssl._
 
 import akka.actor.ActorSystem
 import akka.http.play.WebSocketHandler
-import akka.http.scaladsl.model.{ headers, _ }
 import akka.http.scaladsl.model.headers.Expect
 import akka.http.scaladsl.model.ws.UpgradeToWebSocket
-import akka.http.scaladsl.settings.ServerSettings
+import akka.http.scaladsl.model.{ headers, _ }
+import akka.http.scaladsl.settings.ServerSettings.LogUnencryptedNetworkBytes
+import akka.http.scaladsl.settings.{ ParserSettings, ServerSettings }
 import akka.http.scaladsl.util.FastFuture._
 import akka.http.scaladsl.{ ConnectionContext, Http }
 import akka.stream.Materializer
@@ -25,7 +26,7 @@ import play.api.inject.DefaultApplicationLifecycle
 import play.api.libs.streams.Accumulator
 import play.api.mvc._
 import play.api.routing.Router
-import play.core.server.akkahttp.{ AkkaModelConversion, HttpRequestDecoder }
+import play.core.server.akkahttp.{ AkkaModelConversion, EnhancedConfig, HttpRequestDecoder, PlayParserSettings, SocketOptionSettings }
 import play.core.server.common.{ ForwardedHeaderHandler, ServerResultUtils }
 import play.core.server.ssl.ServerSSLEngine
 import play.core.{ ApplicationProvider, DefaultWebCommands, SourceMapper, WebCommands }
@@ -52,6 +53,8 @@ class AkkaHttpServer(
 
   private val serverConfig = config.configuration.get[Configuration]("play.server")
   private val akkaServerConfig = config.configuration.get[Configuration]("play.server.akka")
+  private val akkaServerParsingConfig = config.configuration.get[Configuration]("play.server.akka.parsing")
+  private val akkaServerSocketOptionsConfig = config.configuration.get[Configuration]("play.server.akka.socket-options")
 
   def mode = config.mode
 
@@ -69,16 +72,18 @@ class AkkaHttpServer(
     )).underlying
     val initialSettings = ServerSettings(initialConfig)
 
+    val enhancedConfig = new EnhancedConfig(akkaServerConfig.underlying)
+
     val idleTimeout = serverConfig.get[Duration](if (secure) "https.idleTimeout" else "http.idleTimeout")
-    val requestTimeoutOption = akkaServerConfig.getOptional[Duration]("requestTimeout")
+    val requestTimeout = enhancedConfig.getPotentiallyInfiniteDuration("requestTimeout")
+    val lingerTimeout = enhancedConfig.getPotentiallyInfiniteDuration("linger-timeout")
 
     // all akka settings that are applied to the server needs to be set here
     val serverSettings: ServerSettings = initialSettings.withTimeouts {
-      val timeouts = initialSettings.timeouts.withIdleTimeout(idleTimeout)
-      requestTimeoutOption match {
-        case Some(requestTimeout) => timeouts.withRequestTimeout(requestTimeout)
-        case None => timeouts
-      }
+      initialSettings.timeouts
+        .withIdleTimeout(idleTimeout)
+        .withRequestTimeout(requestTimeout)
+        .withLingerTimeout(lingerTimeout)
     }
       // Play needs these headers to fill in fields in its request model
       .withRawRequestUriHeader(true)
@@ -87,6 +92,13 @@ class AkkaHttpServer(
       .withTransparentHeadRequests(akkaServerConfig.get[Boolean]("transparent-head-requests"))
       .withServerHeader(akkaServerConfig.getOptional[String]("server-header").filterNot(_ == "").map(headers.Server(_)))
       .withDefaultHostHeader(headers.Host(akkaServerConfig.get[String]("default-host-header")))
+      .withVerboseErrorMessages(akkaServerConfig.get[Boolean]("verbose-error-messages"))
+      .withResponseHeaderSizeHint(akkaServerConfig.get[Int]("response-header-size-hint"))
+      .withMaxConnections(akkaServerConfig.get[Int]("max-connections"))
+      .withPipeliningLimit(akkaServerConfig.get[Int]("pipelining-limit"))
+      .withLogUnencryptedNetworkBytes(LogUnencryptedNetworkBytes(akkaServerConfig.get[String]("log-unencrypted-network-bytes")))
+      .withSocketOptions(SocketOptionSettings.fromSubConfig(akkaServerSocketOptionsConfig.underlying))
+      .withParserSettings(PlayParserSettings.fromSubConfig(akkaServerParsingConfig.underlying))
 
     // TODO: pass in Inet.SocketOption and LoggerAdapter params?
     val bindingFuture: Future[Http.ServerBinding] = try {
