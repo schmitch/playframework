@@ -257,7 +257,8 @@ private class PasstroughAccumulator[-E, +A](future: Future[Accumulator[E, A]]) e
   }
 
   override def toSink: Sink[E, Future[A]] = {
-    Sink.fromGraph(new FutureSink(future.map(_.toSink))).mapMaterializedValue(_.flatten)
+    // Change if we drop support from 2.11 to .mapMaterializedValue(_.flatten)
+    Sink.fromGraph(new FutureSink(future.map(_.toSink))).mapMaterializedValue(_.flatMap(identity))
   }
 
   import scala.annotation.unchecked.{ uncheckedVariance => uV }
