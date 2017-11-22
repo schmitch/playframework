@@ -6,11 +6,14 @@ package play.api.libs.streams
 import java.util.Optional
 import java.util.concurrent.CompletionStage
 
-import akka.stream.Materializer
+import akka.NotUsed
+import akka.stream._
 import akka.stream.scaladsl.{ Flow, Keep, Sink, Source }
+import akka.stream.stage._
+import play.libs.streams
 
 import scala.compat.java8.FutureConverters
-import scala.concurrent.{ ExecutionContext, Future }
+import scala.concurrent.{ ExecutionContext, Future, Promise }
 import scala.compat.java8.FutureConverters._
 import scala.util.Failure
 import scala.util.Success
@@ -221,31 +224,49 @@ private class StrictAccumulator[-E, +A](handler: Option[E] => Future[A], val toS
   )
 }
 
-private class FlattenedAccumulator[-E, +A](future: Future[Accumulator[E, A]])(implicit materializer: Materializer)
-    extends SinkAccumulator[E, A](Accumulator.futureToSink(future)) {
+private class PasstroughAccumulator[-E, +A](future: Future[Accumulator[E, A]]) extends Accumulator[E, A] {
+
+  import play.api.libs.streams.Execution.Implicits.trampoline
 
   override def run(source: Source[E, _])(implicit materializer: Materializer): Future[A] = {
-    future.flatMap(_.run(source))(materializer.executionContext)
+    Source.fromFuture(future).map(value => value.run(source)).flatMapConcat(Source.fromFuture).runWith(Sink.head)
   }
 
-  override def run()(implicit materializer: Materializer): Future[A] = future.flatMap(_.run())(materializer.executionContext)
+  override def run()(implicit materializer: Materializer): Future[A] = run(Source.empty)
+
+  override def run(elem: E)(implicit materializer: Materializer): Future[A] = run(Source.single(elem))
+
+  override def map[B](f: A => B)(implicit executor: ExecutionContext): Accumulator[E, B] = {
+    new PasstroughAccumulator(future.map(_.map(f)))
+  }
+
+  override def mapFuture[B](f: A => Future[B])(implicit executor: ExecutionContext): Accumulator[E, B] = {
+    new PasstroughAccumulator(future.map(_.mapFuture(f)))
+  }
+
+  override def recover[B >: A](pf: PartialFunction[Throwable, B])(implicit executor: ExecutionContext): Accumulator[E, B] = {
+    new PasstroughAccumulator(future.map(_.recover(pf)))
+  }
+
+  override def recoverWith[B >: A](pf: PartialFunction[Throwable, Future[B]])(implicit executor: ExecutionContext): Accumulator[E, B] = {
+    new PasstroughAccumulator(future.map(_.recoverWith(pf)))
+  }
+
+  override def through[F](flow: Flow[F, E, _]): Accumulator[F, A] = {
+    new PasstroughAccumulator(future.map(_.through(flow)))
+  }
+
+  override def toSink: Sink[E, Future[A]] = {
+    Sink.fromGraph(new FutureSink(future.map(_.toSink))).mapMaterializedValue(_.flatten)
+  }
+
+  import scala.annotation.unchecked.{ uncheckedVariance => uV }
+
+  override def asJava: play.libs.streams.Accumulator[E @uV, A @uV] = new SinkAccumulator(toSink).asJava
 
 }
 
 object Accumulator {
-
-  private[streams] def futureToSink[E, A](future: Future[Accumulator[E, A]])(implicit materializer: Materializer): Sink[E, Future[A]] = {
-    import Execution.Implicits.trampoline
-
-    Sink.asPublisher[E](fanout = false).mapMaterializedValue { publisher =>
-      future.recover {
-        case error =>
-          new SinkAccumulator(Sink.cancelled[E].mapMaterializedValue(_ => Future.failed(error)))
-      }.flatMap { accumulator =>
-        Source.fromPublisher(publisher).toMat(accumulator.toSink)(Keep.right).run()
-      }
-    }
-  }
 
   /**
    * Create a new accumulator from the given Sink.
@@ -299,7 +320,10 @@ object Accumulator {
    * Flatten a future of an accumulator to an accumulator.
    */
   def flatten[E, A](future: Future[Accumulator[E, A]])(implicit materializer: Materializer): Accumulator[E, A] = {
-    new FlattenedAccumulator[E, A](future)
+    import play.api.libs.streams.Execution.Implicits.trampoline
+    new PasstroughAccumulator(future.recover {
+      case error => new SinkAccumulator(Sink.cancelled[E].mapMaterializedValue(_ => Future.failed(error)))
+    })
   }
 
 }
