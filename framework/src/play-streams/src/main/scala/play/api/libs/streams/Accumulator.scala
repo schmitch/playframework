@@ -224,7 +224,26 @@ private class StrictAccumulator[-E, +A](handler: Option[E] => Future[A], val toS
   )
 }
 
+private class FlattenedAccumulator[-E, +A](future: Future[Accumulator[E, A]])(implicit materializer: Materializer)
+    extends SinkAccumulator[E, A](Accumulator.futureToSink(future)) {
+
+  override def run(source: Source[E, _])(implicit materializer: Materializer): Future[A] = {
+    future.flatMap(_.run(source))(materializer.executionContext)
+  }
+
+  override def run()(implicit materializer: Materializer): Future[A] = future.flatMap(_.run())(materializer.executionContext)
+
+}
+
 object Accumulator {
+
+  private[streams] def futureToSink[E, A](future: Future[Accumulator[E, A]])(implicit materializer: Materializer): Sink[E, Future[A]] = {
+    import Execution.Implicits.trampoline
+
+    Sink.fromGraph(new FutureSink(future.recover {
+      case error => new SinkAccumulator(Sink.cancelled[E].mapMaterializedValue(_ => Future.failed(error)))
+    }.map(_.toSink))).mapMaterializedValue(_.flatMap(identity))
+  }
 
   /**
    * Create a new accumulator from the given Sink.
@@ -278,11 +297,7 @@ object Accumulator {
    * Flatten a future of an accumulator to an accumulator.
    */
   def flatten[E, A](future: Future[Accumulator[E, A]])(implicit materializer: Materializer): Accumulator[E, A] = {
-    import play.api.libs.streams.Execution.Implicits.trampoline
-
-    new SinkAccumulator(Sink.fromGraph(new FutureSink(future.recover {
-      case error => new SinkAccumulator(Sink.cancelled[E].mapMaterializedValue(_ => Future.failed(error)))
-    }.map(_.toSink))).mapMaterializedValue(_.flatMap(identity)))
+    new FlattenedAccumulator(future)
   }
 
 }
