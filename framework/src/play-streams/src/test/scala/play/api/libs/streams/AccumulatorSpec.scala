@@ -3,11 +3,12 @@
  */
 package play.api.libs.streams
 
-import akka.actor.ActorSystem
-import akka.stream.scaladsl.{ Flow, Source, Sink }
-import akka.stream.{ ActorMaterializer, Materializer }
+import java.util.concurrent.TimeUnit
 
-import org.reactivestreams.{ Subscription, Subscriber, Publisher }
+import akka.actor.ActorSystem
+import akka.stream.scaladsl.{ Flow, Sink, Source }
+import akka.stream.{ ActorMaterializer, Materializer }
+import org.reactivestreams.{ Publisher, Subscriber, Subscription }
 import org.specs2.mutable.Specification
 
 import scala.compat.java8.FutureConverters
@@ -92,6 +93,10 @@ class AccumulatorSpec extends Specification {
 
       "for a successful future" in withMaterializer { implicit m =>
         await(Accumulator.flatten(Future(sum)).run(source)) must_== 6
+      }
+
+      "for a successful future with an empty Source" in withMaterializer { implicit m =>
+        await(Accumulator.flatten(Future(sum)).run(Source.empty)) must_== 0
       }
 
       "for a failed future" in withMaterializer { implicit m =>

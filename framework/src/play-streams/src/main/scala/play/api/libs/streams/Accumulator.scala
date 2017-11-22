@@ -279,6 +279,7 @@ object Accumulator {
    */
   def flatten[E, A](future: Future[Accumulator[E, A]])(implicit materializer: Materializer): Accumulator[E, A] = {
     import play.api.libs.streams.Execution.Implicits.trampoline
+
     new SinkAccumulator(Sink.fromGraph(new FutureSink(future.recover {
       case error => new SinkAccumulator(Sink.cancelled[E].mapMaterializedValue(_ => Future.failed(error)))
     }.map(_.toSink))).mapMaterializedValue(_.flatMap(identity)))
