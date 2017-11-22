@@ -25,7 +25,7 @@ private[streams] class FutureSink[E, A](future: Future[Sink[E, A]])
 
         val callback = getAsyncCallback[Sink[E, A]] { sink =>
           val subMaterializedValue = Source.fromGraph(sourceOut.source).toMat(sink)(Keep.right).run()(subFusingMaterializer)
-          promise.trySuccess(subMaterializedValue)
+          promise.success(subMaterializedValue)
         }
 
         future.foreach(callback.invoke)
