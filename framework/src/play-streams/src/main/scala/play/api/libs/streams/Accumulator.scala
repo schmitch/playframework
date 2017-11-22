@@ -229,7 +229,7 @@ private class PasstroughAccumulator[-E, +A](future: Future[Accumulator[E, A]]) e
   import play.api.libs.streams.Execution.Implicits.trampoline
 
   override def run(source: Source[E, _])(implicit materializer: Materializer): Future[A] = {
-    Source.fromFuture(future).map(value => value.run(source)).flatMapConcat(Source.fromFuture).runWith(Sink.head)
+    source.toMat(toSink)(Keep.right).run()
   }
 
   override def run()(implicit materializer: Materializer): Future[A] = run(Source.empty)
