@@ -15,10 +15,12 @@
  */
 package play.core.cookie.encoding;
 
+import com.google.common.base.Suppliers;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.CharBuffer;
+import java.util.function.Supplier;
 
 import static play.core.cookie.encoding.CookieUtil.*;
 
@@ -27,7 +29,7 @@ import static play.core.cookie.encoding.CookieUtil.*;
  */
 abstract class CookieDecoder {
 
-    private final Logger logger = LoggerFactory.getLogger(getClass());
+    private final Supplier<Logger> logger = Suppliers.memoize(() -> LoggerFactory.getLogger(getClass()));
 
     private final boolean strict;
 
@@ -37,20 +39,20 @@ abstract class CookieDecoder {
 
     protected DefaultCookie initCookie(String header, int nameBegin, int nameEnd, int valueBegin, int valueEnd) {
         if (nameBegin == -1 || nameBegin == nameEnd) {
-            logger.debug("Skipping cookie with null name");
+            logger.get().debug("Skipping cookie with null name");
             return null;
         }
 
         if (valueBegin == -1) {
-            logger.debug("Skipping cookie with null value");
+            logger.get().debug("Skipping cookie with null value");
             return null;
         }
 
         CharSequence wrappedValue = CharBuffer.wrap(header, valueBegin, valueEnd);
         CharSequence unwrappedValue = unwrapValue(wrappedValue);
         if (unwrappedValue == null) {
-            if (logger.isDebugEnabled()) {
-                logger.debug("Skipping cookie because starting quotes are not properly balanced in '"
+            if (logger.get().isDebugEnabled()) {
+                logger.get().debug("Skipping cookie because starting quotes are not properly balanced in '"
                     + wrappedValue + "'");
             }
             return null;
@@ -60,8 +62,8 @@ abstract class CookieDecoder {
 
         int invalidOctetPos;
         if (strict && (invalidOctetPos = firstInvalidCookieNameOctet(name)) >= 0) {
-            if (logger.isDebugEnabled()) {
-                logger.debug("Skipping cookie because name '" + name + "' contains invalid char '"
+            if (logger.get().isDebugEnabled()) {
+                logger.get().debug("Skipping cookie because name '" + name + "' contains invalid char '"
                     + name.charAt(invalidOctetPos) + "'");
             }
             return null;
@@ -70,8 +72,8 @@ abstract class CookieDecoder {
         final boolean wrap = unwrappedValue.length() != valueEnd - valueBegin;
 
         if (strict && (invalidOctetPos = firstInvalidCookieValueOctet(unwrappedValue)) >= 0) {
-            if (logger.isDebugEnabled()) {
-                logger.debug("Skipping cookie because value '" + unwrappedValue
+            if (logger.get().isDebugEnabled()) {
+                logger.get().debug("Skipping cookie because value '" + unwrappedValue
                     + "' contains invalid char '" + unwrappedValue.charAt(invalidOctetPos) + "'");
             }
             return null;

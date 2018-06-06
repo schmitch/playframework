@@ -21,7 +21,7 @@ trait LoggerLike {
   /**
    * The underlying SLF4J Logger.
    */
-  val logger: Slf4jLogger
+  def logger: Slf4jLogger
 
   /**
    * The underlying SLF4J Logger.
@@ -242,9 +242,11 @@ trait LoggerLike {
  *
  * @param logger the underlying SL4FJ logger
  */
-class Logger private (val logger: Slf4jLogger, isEnabled: => Boolean) extends LoggerLike {
+class Logger private (internalLogger: => Slf4jLogger, isEnabled: => Boolean) extends LoggerLike {
 
-  def this(logger: Slf4jLogger) = this(logger, true)
+  lazy val logger: Slf4jLogger = internalLogger
+
+  def this(internalLogger: => Slf4jLogger) = this(internalLogger, true)
 
   @inline override def enabled = isEnabled
 
@@ -276,7 +278,7 @@ class Logger private (val logger: Slf4jLogger, isEnabled: => Boolean) extends Lo
  */
 object Logger extends Logger(LoggerFactory.getLogger("application")) {
 
-  private[this] val log: Slf4jLogger = LoggerFactory.getLogger(getClass)
+  private[this] lazy val log: Slf4jLogger = LoggerFactory.getLogger(getClass)
 
   private[this] var _mode: Option[Mode] = None
   private[this] val _appsRunning: AtomicInteger = new AtomicInteger(0)
@@ -331,7 +333,6 @@ object Logger extends Logger(LoggerFactory.getLogger("application")) {
    * @return a logger
    */
   def apply(clazz: Class[_]): Logger = new Logger(LoggerFactory.getLogger(clazz.getName.stripSuffix("$")))
-
 }
 
 /**
